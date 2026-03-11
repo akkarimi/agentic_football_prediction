@@ -71,7 +71,7 @@ with st.sidebar:
             else:
                 with st.spinner("Fetching matches, news, and generating predictions..."):
                     try:
-                        predictions = run_pipeline_averaged(selected_date.isoformat(), runs=3)
+                        predictions = run_pipeline_averaged(selected_date.isoformat(), runs=1)
                         if predictions:
                             save_predictions(predictions)
                             st.success(f"Done — {len(predictions)} match(es) predicted.")
