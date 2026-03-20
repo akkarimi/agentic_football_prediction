@@ -44,7 +44,8 @@ with st.sidebar:
     Manchester United · Real Madrid · Barcelona ·
     Arsenal · Chelsea · Manchester City ·
     Bayern Munich · Borussia Dortmund ·
-    Inter Milan · Paris Saint-Germain
+    Inter Milan · Paris Saint-Germain · Liverpool · Atletico Madrid ·
+    AC Milan · Napoli · Juventus
     """)
     st.divider()
 
@@ -110,7 +111,6 @@ with st.sidebar:
     st.divider()
     st.caption("Powered by Groq + LangGraph")
     st.caption("Built by **AK**")
-    st.caption("© 2026 · All rights reserved")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 

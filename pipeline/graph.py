@@ -110,7 +110,9 @@ def _fmt_news(items: list[dict]) -> str:
 TRACKED_TEAMS = {
     "manchester united", "real madrid", "arsenal",
     "chelsea", "manchester city", "bayern", "dortmund",
-    "inter milan", "paris saint-germain", "psg", "fc barcelona",
+    "inter milan", "ac milan", "paris saint-germain", "psg", 
+    "fc barcelona", "liverpool", "atletico madrid", "juventus",
+    "napoli"
 }
 
 def _is_tracked(match: dict) -> bool:
