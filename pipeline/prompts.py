@@ -38,4 +38,9 @@ LATEST NEWS & INJURIES:
 
 Based on all of the above, provide your prediction including the expected number of goals each team will score (as decimals, e.g. 1.7).
 
-For the match_preview write 2-3 specific sentences covering: current form of both teams, one or two key players who could decide the match, and a tactical observation. Be specific — mention actual player names and recent results."""
+For the match_preview write 2-3 specific sentences covering: current form of both teams, one or two key players who could decide the match, and a tactical observation. 
+
+Be specific — mention actual player names and recent results.
+
+Make sure that the players list is up-to-date (DATE: {match_date}) and they currently part of the team. 
+"""
