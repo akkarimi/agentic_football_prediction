@@ -44,9 +44,9 @@ def get_standings(competition_code: str) -> dict:
 
 
 def search_news(query: str, max_results: int = 4) -> list[dict]:
-    """Search for team news using DuckDuckGo (free, no API key needed)."""
+    """Search for team news from the past month using DuckDuckGo (free, no API key needed)."""
     try:
-        results = DDGS().text(query, max_results=max_results)
+        results = DDGS().text(query, max_results=max_results, timelimit="m")
         return list(results) if results else []
     except Exception:
         return []

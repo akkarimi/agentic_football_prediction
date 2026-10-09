@@ -17,4 +17,5 @@ def _get(key: str, default: str = "") -> str:
 FOOTBALL_DATA_API_KEY = _get("FOOTBALL_DATA_API_KEY")
 GROQ_API_KEY          = _get("FTgroqkey")
 DB_PATH               = _get("DB_PATH", "predictions.db")
-GROQ_MODEL            = _get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL            = _get("GROQ_MODEL", "openai/gpt-oss-120b")
+DAILY_RUN_TIME        = _get("DAILY_RUN_TIME", "23:30")  # local time, HH:MM

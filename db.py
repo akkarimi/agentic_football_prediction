@@ -31,6 +31,19 @@ def init_db():
                 UNIQUE(match_id, match_date)
             )
         """)
+        conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+
+
+def get_meta(key: str) -> str | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+
+def set_meta(key: str, value: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
         conn.commit()
 
 
@@ -81,6 +94,16 @@ def get_last_updated() -> str | None:
         row = conn.execute("SELECT MAX(created_at) FROM predictions").fetchone()
         return row[0] if row and row[0] else None
 
+def get_past_prediction_dates() -> list[tuple[str, int]]:
+    """Dates before today that have stored predictions, newest first, with their match counts."""
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute("""
+            SELECT match_date, COUNT(*) FROM predictions
+            WHERE match_date < ?
+            GROUP BY match_date ORDER BY match_date DESC
+        """, (date.today().isoformat(),)).fetchall()
+
+
 def migrate_actual_columns():
     """Add actual result columns to existing tables if missing."""
     with sqlite3.connect(DB_PATH) as conn:
@@ -93,13 +116,13 @@ def migrate_actual_columns():
 
 
 def get_unresolved_predictions() -> list[dict]:
-    """Get past predictions that have no actual result yet."""
+    """Get predictions up to today that have no actual result yet."""
     from datetime import date
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute("""
             SELECT match_id, match_date FROM predictions
-            WHERE actual_winner IS NULL AND match_date < ?
+            WHERE actual_winner IS NULL AND match_date <= ?
         """, (date.today().isoformat(),)).fetchall()
     return [dict(r) for r in rows]
 

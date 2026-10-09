@@ -1,6 +1,7 @@
 from typing import TypedDict
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
+from datetime import datetime
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -20,15 +21,30 @@ from pipeline.prompts import SYSTEM_PROMPT, build_match_prompt
 # --- Output schema ---
 
 class Prediction(BaseModel):
-    home_win_prob:    float
-    draw_prob:        float
-    away_win_prob:    float
-    home_goals:       float
-    away_goals:       float
+    home_win_prob:    float = Field(description="Probability the home team wins, between 0 and 1.")
+    draw_prob:        float = Field(description="Probability of a draw, between 0 and 1.")
+    away_win_prob:    float = Field(description="Probability the away team wins, between 0 and 1.")
+    home_goals:       int = Field(description="Home team goals in the most likely final score.")
+    away_goals:       int = Field(description="Away team goals in the most likely final score.")
     confidence:       Literal["low", "medium", "high"]
     key_factors:      list[str]
-    match_preview: str = Field(description="A detailed 2-3 sentence match preview covering recent form, key players to watch, and tactical outlook. Must be specific to these two teams.")
+    match_preview: str = Field(description="A detailed 2-3 sentence match preview covering recent form, what could decide the match, and tactical outlook. Must be specific to these two teams. Only names players that appear in the supplied news.")
     predicted_winner: Literal["home", "draw", "away"]
+
+
+def _consistency_problem(p: Prediction) -> str | None:
+    """Describe how a prediction contradicts itself, or None if it is coherent."""
+    probs = {"home": p.home_win_prob, "draw": p.draw_prob, "away": p.away_win_prob}
+    if min(probs.values()) < 0 or sum(probs.values()) <= 0:
+        return "The probabilities must be non-negative and sum to 1."
+    if probs[p.predicted_winner] < max(probs.values()):
+        return (f"predicted_winner is '{p.predicted_winner}' but that is not the outcome with the "
+                f"highest probability (home {p.home_win_prob}, draw {p.draw_prob}, away {p.away_win_prob}).")
+    score_winner = "home" if p.home_goals > p.away_goals else "away" if p.away_goals > p.home_goals else "draw"
+    if score_winner != p.predicted_winner:
+        return (f"The score {p.home_goals}-{p.away_goals} is a '{score_winner}' result but "
+                f"predicted_winner is '{p.predicted_winner}'.")
+    return None
 
 
 
@@ -107,137 +123,155 @@ def _fmt_news(items: list[dict]) -> str:
 
 # --- Nodes ---
 
+# Display name -> lowercase fragments that identify the club in Football-Data.org team names.
+# The page's team list is generated from this, so add or remove clubs here only.
 TRACKED_TEAMS = {
-    "manchester united", "real madrid", "arsenal",
-    "chelsea", "manchester city", "bayern", "dortmund",
-    "inter milan", "ac milan", "paris saint-germain", "psg", 
-    "fc barcelona", "liverpool", "atletico madrid", "juventus",
-    "napoli"
+    "Manchester United":   ["manchester united"],
+    "Manchester City":     ["manchester city"],
+    "Arsenal":             ["arsenal"],
+    "Chelsea":             ["chelsea"],
+    "Liverpool":           ["liverpool"],
+    "Tottenham Hotspur":   ["tottenham"],
+    "Real Madrid":         ["real madrid"],
+    "Barcelona":           ["fc barcelona"],
+    "Atletico Madrid":     ["atletico madrid", "atlético de madrid"],
+    "Bayern Munich":       ["bayern"],
+    "Borussia Dortmund":   ["dortmund"],
+    "Inter Milan":         ["inter milan", "internazionale"],
+    "AC Milan":            ["ac milan"],
+    "Juventus":            ["juventus"],
+    "Napoli":              ["napoli"],
+    "Paris Saint-Germain": ["paris saint-germain", "psg"],
 }
 
 def _is_tracked(match: dict) -> bool:
     home = match.get("homeTeam", {}).get("name", "").lower()
     away = match.get("awayTeam", {}).get("name", "").lower()
-    return any(t in home or t in away for t in TRACKED_TEAMS)
+    return any(alias in home or alias in away for aliases in TRACKED_TEAMS.values() for alias in aliases)
+
+
+def fetch_tracked_matches(target_date: str) -> list[dict]:
+    """Tracked-team fixtures for a date, in kickoff order."""
+    matches = [m for m in get_todays_matches(target_date) if _is_tracked(m)]
+    return sorted(matches, key=lambda m: m.get("utcDate", ""))
 
 
 def fetch_fixtures(state: State) -> State:
+    return {**state, "matches": fetch_tracked_matches(state["target_date"])}
+
+
+def _enrich_match(match: dict) -> dict:
     try:
-        matches = get_todays_matches(state["target_date"])
-        matches = [m for m in matches if _is_tracked(m)]
-    except Exception as e:
-        print("DEBUG fetch_fixtures ERROR:", e)
-        matches = []
-    return {**state, "matches": matches}
-
-
-
-
-def enrich_matches(state: State) -> State:
-    enriched = []
-    for match in state["matches"]:
-        try:
-            home_id   = match["homeTeam"]["id"]
-            away_id   = match["awayTeam"]["id"]
-            match_id  = match["id"]
-            comp_code = match["competition"]["code"]
-            home_name = match["homeTeam"]["name"]
-            away_name = match["awayTeam"]["name"]
-
-            home_form = get_team_form(home_id)
-            away_form = get_team_form(away_id)
-            h2h       = get_head_to_head(match_id)
-
-            try:
-                standings = get_standings(comp_code)
-            except Exception:
-                standings = {}
-
-            home_news = search_news(f"{home_name} football injury team news 2025")
-            away_news = search_news(f"{away_name} football injury team news 2025")
-
-            enriched.append({
-                **match,
-                "home_form": home_form,
-                "away_form": away_form,
-                "h2h":       h2h,
-                "standings": standings,
-                "news":      home_news + away_news,
-            })
-        except Exception as e:
-            enriched.append({**match, "enrich_error": str(e)})
-
-    return {**state, "enriched": enriched}
-
-
-def predict_matches(state: State) -> State:
-    llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, temperature=0.1)
-    structured_llm = llm.with_structured_output(Prediction)
-
-    predictions = []
-    for match in state["enriched"]:
+        home_id   = match["homeTeam"]["id"]
+        away_id   = match["awayTeam"]["id"]
+        match_id  = match["id"]
+        comp_code = match["competition"]["code"]
         home_name = match["homeTeam"]["name"]
         away_name = match["awayTeam"]["name"]
 
-        if "enrich_error" in match:
-            predictions.append({
-                "match_id":  match["id"],
-                "home_team": home_name,
-                "away_team": away_name,
-                "competition": match["competition"]["name"],
-                "match_date":  match["utcDate"][:10],
-                "error": match["enrich_error"],
-                "home_goals": result.home_goals,
-                "away_goals": result.away_goals,
-
-            })
-            continue
-
-        prompt = build_match_prompt(
-            home_team   = home_name,
-            away_team   = away_name,
-            competition = match["competition"]["name"],
-            match_date  = match["utcDate"][:10],
-            home_form   = _fmt_form(match.get("home_form", [])),
-            away_form   = _fmt_form(match.get("away_form", [])),
-            h2h         = _fmt_h2h(match.get("h2h", {})),
-            standings   = _fmt_standings(match.get("standings", {}), home_name, away_name),
-            news        = _fmt_news(match.get("news", [])),
-        )
+        home_form = get_team_form(home_id)
+        away_form = get_team_form(away_id)
+        h2h       = get_head_to_head(match_id)
 
         try:
-            result = structured_llm.invoke([
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=prompt),
-            ])
-            predictions.append({
-                "match_id":       match["id"],
-                "home_team":      home_name,
-                "away_team":      away_name,
-                "competition":    match["competition"]["name"],
-                "match_date":     match["utcDate"][:10],
-                "utc_date":       match["utcDate"],
-                "home_win_prob":  result.home_win_prob,
-                "draw_prob":      result.draw_prob,
-                "away_win_prob":  result.away_win_prob,
-                "home_goals":     result.home_goals,
-                "away_goals":     result.away_goals,
-                "confidence":     result.confidence,
-                "key_factors":    result.key_factors,
-                "match_preview":  result.match_preview,
-                "predicted_winner": result.predicted_winner,
-            })
-        except Exception as e:
-            predictions.append({
-                "match_id":   match["id"],
-                "home_team":  home_name,
-                "away_team":  away_name,
-                "competition": match["competition"]["name"],
-                "match_date":  match["utcDate"][:10],
-                "error": str(e),
-            })
+            standings = get_standings(comp_code)
+        except Exception:
+            standings = {}
 
-    return {**state, "predictions": predictions}
+        when = datetime.fromisoformat(match["utcDate"][:10]).strftime("%B %Y")
+        home_news = search_news(f"{home_name} football injury team news {when}")
+        away_news = search_news(f"{away_name} football injury team news {when}")
+
+        return {
+            **match,
+            "home_form": home_form,
+            "away_form": away_form,
+            "h2h":       h2h,
+            "standings": standings,
+            "news":      home_news + away_news,
+        }
+    except Exception as e:
+        return {**match, "enrich_error": str(e)}
+
+
+def enrich_matches(state: State) -> State:
+    return {**state, "enriched": [_enrich_match(m) for m in state["matches"]]}
+
+
+def _structured_llm():
+    llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, temperature=0.1)
+    # The model occasionally returns malformed JSON, so retry before giving up on a match
+    return llm.with_structured_output(Prediction, method="json_schema").with_retry(stop_after_attempt=3)
+
+
+def _predict_match(structured_llm, match: dict) -> dict:
+    home_name = match["homeTeam"]["name"]
+    away_name = match["awayTeam"]["name"]
+    base = {
+        "match_id":    match["id"],
+        "home_team":   home_name,
+        "away_team":   away_name,
+        "competition": match["competition"]["name"],
+        "match_date":  match["utcDate"][:10],
+    }
+
+    if "enrich_error" in match:
+        return {**base, "error": match["enrich_error"]}
+
+    prompt = build_match_prompt(
+        home_team   = home_name,
+        away_team   = away_name,
+        competition = match["competition"]["name"],
+        match_date  = match["utcDate"][:10],
+        home_form   = _fmt_form(match.get("home_form", [])),
+        away_form   = _fmt_form(match.get("away_form", [])),
+        h2h         = _fmt_h2h(match.get("h2h", {})),
+        standings   = _fmt_standings(match.get("standings", {}), home_name, away_name),
+        news        = _fmt_news(match.get("news", [])),
+    )
+
+    try:
+        messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=prompt)]
+        # Winner, probabilities and score come back as separate fields and can disagree,
+        # so send a contradictory answer back for correction rather than showing it
+        for _ in range(3):
+            result = structured_llm.invoke(messages)
+            problem = _consistency_problem(result)
+            if not problem:
+                break
+            messages += [
+                AIMessage(content=result.model_dump_json()),
+                HumanMessage(content=f"That prediction contradicts itself. {problem} Give a corrected, consistent prediction."),
+            ]
+        else:
+            return {**base, "error": f"Model kept giving a contradictory prediction. {problem}"}
+
+        total = result.home_win_prob + result.draw_prob + result.away_win_prob
+        return {
+            **base,
+            "utc_date":       match["utcDate"],
+            "home_win_prob":  result.home_win_prob / total,
+            "draw_prob":      result.draw_prob / total,
+            "away_win_prob":  result.away_win_prob / total,
+            "home_goals":     result.home_goals,
+            "away_goals":     result.away_goals,
+            "confidence":     result.confidence,
+            "key_factors":    result.key_factors,
+            "match_preview":  result.match_preview,
+            "predicted_winner": result.predicted_winner,
+        }
+    except Exception as e:
+        return {**base, "error": str(e)}
+
+
+def predict_matches(state: State) -> State:
+    structured_llm = _structured_llm()
+    return {**state, "predictions": [_predict_match(structured_llm, m) for m in state["enriched"]]}
+
+
+def predict_match(match: dict) -> dict:
+    """Enrich and predict a single fixture, so callers can show results one match at a time."""
+    return _predict_match(_structured_llm(), _enrich_match(match))
 
 
 # --- Build graph ---
@@ -276,10 +310,13 @@ def run_pipeline_averaged(target_date: str, runs: int = 3) -> list[dict]:
 
     # Group by match_id
     by_match = defaultdict(list)
+    failed = {}
     for run in all_runs:
         for pred in run:
             if "error" not in pred:
                 by_match[pred["match_id"]].append(pred)
+            else:
+                failed[pred["match_id"]] = pred
 
     averaged = []
     for match_id, preds in by_match.items():
@@ -296,6 +333,9 @@ def run_pipeline_averaged(target_date: str, runs: int = 3) -> list[dict]:
         base["predicted_winner"] = Counter(p["predicted_winner"] for p in preds).most_common(1)[0][0]
         base["confidence"]       = Counter(p["confidence"]       for p in preds).most_common(1)[0][0]
         averaged.append(base)
+
+    # Matches that failed in every run are returned with their error so the caller can report them
+    averaged.extend(p for match_id, p in failed.items() if match_id not in by_match)
 
     return averaged
 
