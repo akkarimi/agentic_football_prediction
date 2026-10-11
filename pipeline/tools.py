@@ -44,12 +44,18 @@ def get_standings(competition_code: str) -> dict:
 
 
 def search_news(query: str, max_results: int = 4) -> list[dict]:
-    """Search for team news from the past month using DuckDuckGo (free, no API key needed)."""
-    try:
-        results = DDGS().text(query, max_results=max_results, timelimit="m")
-        return list(results) if results else []
-    except Exception:
-        return []
+    """Search for team news from the past month using DuckDuckGo (free, no API key needed).
+
+    Prefers dated news articles; falls back to a general web search when there are none.
+    """
+    for search in (DDGS().news, DDGS().text):
+        try:
+            results = list(search(query, max_results=max_results, timelimit="m") or [])
+        except Exception:
+            results = []
+        if results:
+            return results
+    return []
 
 def get_match_result(match_id: int) -> dict | None:
     """Fetch actual score for a finished match."""

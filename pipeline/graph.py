@@ -1,6 +1,5 @@
 from typing import TypedDict
 from langchain_groq import ChatGroq
-from datetime import datetime
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
@@ -113,11 +112,12 @@ def _fmt_news(items: list[dict]) -> str:
     if not items:
         return "No recent news found"
     lines = []
-    for item in items[:6]:
+    for item in items[:8]:
         title = item.get("title", "")
         body  = item.get("body", item.get("snippet", ""))[:150]
+        day   = (item.get("date") or "")[:10]
         if title:
-            lines.append(f"• {title}: {body}")
+            lines.append(f"• {day + ' — ' if day else ''}{title}: {body}")
     return "\n".join(lines)
 
 
@@ -178,9 +178,12 @@ def _enrich_match(match: dict) -> dict:
         except Exception:
             standings = {}
 
-        when = datetime.fromisoformat(match["utcDate"][:10]).strftime("%B %Y")
-        home_news = search_news(f"{home_name} football injury team news {when}")
-        away_news = search_news(f"{away_name} football injury team news {when}")
+        # Two searches per team: availability, then the wider story around the club (mood, manager, off-field)
+        home_news, away_news = (
+            search_news(f"{name} injury team news")
+            + search_news(f"{name} football news")
+            for name in (home_name, away_name)
+        )
 
         return {
             **match,
@@ -188,7 +191,8 @@ def _enrich_match(match: dict) -> dict:
             "away_form": away_form,
             "h2h":       h2h,
             "standings": standings,
-            "news":      home_news + away_news,
+            "home_news": home_news,
+            "away_news": away_news,
         }
     except Exception as e:
         return {**match, "enrich_error": str(e)}
@@ -227,7 +231,8 @@ def _predict_match(structured_llm, match: dict) -> dict:
         away_form   = _fmt_form(match.get("away_form", [])),
         h2h         = _fmt_h2h(match.get("h2h", {})),
         standings   = _fmt_standings(match.get("standings", {}), home_name, away_name),
-        news        = _fmt_news(match.get("news", [])),
+        news        = (f"{home_name}:\n{_fmt_news(match.get('home_news', []))}\n\n"
+                       f"{away_name}:\n{_fmt_news(match.get('away_news', []))}"),
     )
 
     try:

@@ -22,7 +22,7 @@ st.set_page_config(
 st.markdown("""
     <style>
     [data-testid="stHeader"] { background: transparent; }
-    [data-testid="stMainBlockContainer"] { padding-top: 2rem; max-width: 1100px; }
+    [data-testid="stMainBlockContainer"] { padding-top: 2rem; max-width: 1300px; }
     .fp-hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem;
                background: linear-gradient(135deg, #053D22 0%, #0B8A3E 100%); color: #FFFFFF;
                border-radius: 1rem; padding: 1.4rem 1.8rem; margin-bottom: 0.4rem; }
@@ -40,10 +40,10 @@ st.markdown("""
                opacity: 0.65; margin: 0.8rem 0 0; }
     .fp-meta { display: flex; justify-content: space-between; font-size: 0.8rem; opacity: 0.7; }
     .fp-teams { display: flex; align-items: center; gap: 1rem; margin: 0.6rem 0 0.9rem; }
-    .fp-team { flex: 1; font-size: 1.35rem; font-weight: 400; opacity: 0.75; }
+    .fp-team { flex: 1; font-size: 1.15rem; font-weight: 400; opacity: 0.75; }
     .fp-team.fp-pick { font-weight: 700; opacity: 1; }
     .fp-team.fp-away { text-align: right; }
-    .fp-score { text-align: center; min-width: 7rem; }
+    .fp-score { text-align: center; min-width: 5.5rem; }
     .fp-score-value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .fp-score-label { font-size: 0.72rem; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.05em; }
     .fp-bar { display: flex; border-radius: 0.4rem; overflow: hidden; gap: 2px; margin-bottom: 0.6rem; }
@@ -54,11 +54,27 @@ st.markdown("""
     .fp-draw-seg { background: #5F6673; }
     .fp-away-seg { background: #2563EB; }
     .fp-final { text-align: center; font-size: 0.95rem; margin: 0.2rem 0 0.6rem; }
+    .fp-team { overflow-wrap: anywhere; }
     @media (max-width: 640px) {
-        .fp-team { font-size: 1.05rem; }
-        .fp-score { min-width: 5rem; }
+        [data-testid="stMainBlockContainer"] { padding: 1rem 0.75rem 3rem; }
+        .fp-hero { padding: 1rem; border-radius: 0.8rem; gap: 0.8rem; }
+        .fp-hero-title { font-size: 1.45rem; }
+        .fp-hero-sub { font-size: 0.85rem; }
+        .fp-hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; width: 100%; }
+        .fp-tile { min-width: 0; padding: 0.5rem 0.25rem; }
+        .fp-tile-label { font-size: 0.6rem; letter-spacing: 0.03em; }
+        .fp-tile-value { font-size: 1.35rem; }
+        .fp-tile-sub { font-size: 0.65rem; }
+        .fp-day { font-size: 1.25rem; }
+        .fp-day span { font-size: 0.9rem; }
+        .fp-meta { font-size: 0.72rem; }
+        .fp-teams { gap: 0.5rem; margin: 0.5rem 0 0.7rem; }
+        .fp-team { font-size: 1rem; line-height: 1.25; }
+        .fp-score { min-width: 4.2rem; }
         .fp-score-value { font-size: 1.25rem; }
-        .fp-bar > div { padding: 0.3rem 0.35rem; font-size: 0.75rem; }
+        .fp-score-label { font-size: 0.62rem; }
+        .fp-bar > div { padding: 0.35rem 0.3rem; font-size: 0.72rem; }
+        .fp-final { font-size: 0.85rem; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -83,13 +99,13 @@ def hero_html() -> str:
     for label, days in [("Last 7 days", 7), ("All time", None)]:
         stats = get_accuracy_stats(days=days)
         if stats:
-            tiles.append(tile(f"{label} accuracy", f"{stats['accuracy']:.0f}%",
-                              f"{stats['correct']} of {stats['total']} outcomes correct"))
+            tiles.append(tile(label, f"{stats['accuracy']:.0f}%",
+                              f"{stats['correct']} of {stats['total']} correct"))
         else:
-            tiles.append(tile(f"{label} accuracy", "–", "no results yet"))
+            tiles.append(tile(label, "–", "no results yet"))
     if stats:
         tiles.append(tile("Goals off by", f"{(stats['home_goal_mae'] + stats['away_goal_mae']) / 2:.1f}",
-                          f"home {stats['home_goal_mae']} · away {stats['away_goal_mae']}"))
+                          f"home {stats['home_goal_mae']:.1f} · away {stats['away_goal_mae']:.1f}"))
 
     return (
         "<div class='fp-hero'>"
@@ -201,24 +217,14 @@ def day_heading(label: str, day: date):
 def page():
     st.markdown(hero_html(), unsafe_allow_html=True)
 
-    col_status, col_about = st.columns([5, 1.2], vertical_alignment="center")
-    with col_status:
-        status = scheduler_status()
-        finished = get_meta("last_daily_run_finished")
-        if status:
-            st.caption(f"⏳ Updating now — {status}")
-        elif finished:
-            st.caption(f"Updates automatically every day at {DAILY_RUN_TIME} · last update {finished.replace('T', ' ')}")
-        else:
-            st.caption(f"Updates automatically every day at {DAILY_RUN_TIME}")
-    with col_about:
-        with st.popover("About", use_container_width=True):
-            st.markdown(
-                "AI-powered match predictions using live stats, standings, "
-                "and the latest news for Europe's top clubs.\n\n"
-                "**Tracked teams:** " + " · ".join(TRACKED_TEAMS)
-            )
-            st.caption("Powered by Groq + LangGraph · Built by **AK**")
+    status = scheduler_status()
+    finished = get_meta("last_daily_run_finished")
+    if status:
+        st.caption(f"⏳ Updating now — {status}")
+    elif finished:
+        st.caption(f"Updates automatically every day at {DAILY_RUN_TIME} · last update {finished.replace('T', ' ')[:16]}")
+    else:
+        st.caption(f"Updates automatically every day at {DAILY_RUN_TIME}")
 
     if not keys_ok:
         st.error("API keys missing. Check your .env file.")
@@ -231,13 +237,15 @@ def page():
 
     with tab_upcoming:
         today = date.today()
-        for label, day in [("Today", today), ("Tomorrow", today + timedelta(days=1))]:
-            day_heading(label, day)
-            predictions = get_predictions(day.isoformat())
-            if predictions:
-                render_day(predictions)
-            else:
-                st.caption("No predictions for tracked teams on this day.")
+        days = [("Today", today), ("Tomorrow", today + timedelta(days=1))]
+        for column, (label, day) in zip(st.columns(2, gap="medium"), days):
+            with column:
+                day_heading(label, day)
+                predictions = get_predictions(day.isoformat())
+                if predictions:
+                    render_day(predictions)
+                else:
+                    st.caption("No predictions for tracked teams on this day.")
 
     with tab_history:
         past = get_past_prediction_dates()
@@ -251,6 +259,14 @@ def page():
                 format_func=lambda d: f"{date.fromisoformat(d).strftime('%A, %B %d, %Y')} · {counts[d]} match(es)",
             )
             render_day(get_predictions(chosen))
+
+    with st.expander("About"):
+        st.markdown(
+            "AI-powered match predictions using live stats, standings, "
+            "and the latest news for Europe's top clubs.\n\n"
+            "**Tracked teams:** " + " · ".join(TRACKED_TEAMS)
+        )
+        st.caption("Powered by Groq + LangGraph · Built by **AK**")
 
 
 page()
